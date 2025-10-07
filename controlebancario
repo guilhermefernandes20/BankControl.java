@@ -1,0 +1,345 @@
+import java.io.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+
+/**
+ * BankControl - Controle Bancário simples em console
+ * Arquivo único com persistência básica (texto), histórico de transações,
+ * operações: criar conta, depositar, sacar, transferir, listar e extrato.
+ *
+ * Simples de adaptar para interface gráfica ou persistência melhor (DB/JSON).
+ */
+public class BankControl {
+    public static void main(String[] args) {
+        Bank bank = new Bank("banco_data.txt");
+        bank.loadFromFile(); // tenta carregar dados existentes
+        Scanner sc = new Scanner(System.in);
+
+        while (true) {
+            System.out.println("\n=== CONTROLE BANCÁRIO ===");
+            System.out.println("1) Criar conta");
+            System.out.println("2) Listar contas");
+            System.out.println("3) Depositar");
+            System.out.println("4) Sacar");
+            System.out.println("5) Transferir");
+            System.out.println("6) Extrato");
+            System.out.println("7) Salvar dados");
+            System.out.println("0) Sair");
+            System.out.print("Escolha: ");
+
+            String opt = sc.nextLine().trim();
+            try {
+                switch (opt) {
+                    case "1":
+                        System.out.print("Nome do titular: ");
+                        String titular = sc.nextLine();
+                        System.out.print("Tipo de conta (corrente/poupanca): ");
+                        String tipo = sc.nextLine();
+                        Account acc = bank.createAccount(titular, tipo);
+                        System.out.println("Conta criada. Número: " + acc.getAccountNumber());
+                        break;
+                    case "2":
+                        bank.listAccounts();
+                        break;
+                    case "3":
+                        System.out.print("Número da conta: ");
+                        String accNumD = sc.nextLine();
+                        System.out.print("Valor a depositar: ");
+                        double dVal = Double.parseDouble(sc.nextLine());
+                        bank.deposit(accNumD, dVal);
+                        break;
+                    case "4":
+                        System.out.print("Número da conta: ");
+                        String accNumW = sc.nextLine();
+                        System.out.print("Valor a sacar: ");
+                        double wVal = Double.parseDouble(sc.nextLine());
+                        bank.withdraw(accNumW, wVal);
+                        break;
+                    case "5":
+                        System.out.print("Conta origem: ");
+                        String origem = sc.nextLine();
+                        System.out.print("Conta destino: ");
+                        String destino = sc.nextLine();
+                        System.out.print("Valor a transferir: ");
+                        double tVal = Double.parseDouble(sc.nextLine());
+                        bank.transfer(origem, destino, tVal);
+                        break;
+                    case "6":
+                        System.out.print("Número da conta para extrato: ");
+                        String accNumE = sc.nextLine();
+                        bank.printStatement(accNumE);
+                        break;
+                    case "7":
+                        bank.saveToFile();
+                        System.out.println("Dados salvos.");
+                        break;
+                    case "0":
+                        bank.saveToFile();
+                        System.out.println("Saindo... dados salvos.");
+                        sc.close();
+                        return;
+                    default:
+                        System.out.println("Opção inválida.");
+                }
+            } catch (NumberFormatException ex) {
+                System.out.println("Número inválido. Tente novamente.");
+            } catch (Exception ex) {
+                System.out.println("Erro: " + ex.getMessage());
+            }
+        }
+    }
+}
+
+/* ---- Bank class ---- */
+class Bank {
+    private Map<String, Account> accounts = new HashMap<>();
+    private final String storageFile;
+    private int nextAccountSequence = 1;
+
+    public Bank(String storageFile) {
+        this.storageFile = storageFile;
+    }
+
+    public Account createAccount(String owner, String type) {
+        String accNum = generateAccountNumber();
+        Account acc = new Account(accNum, owner, type);
+        accounts.put(accNum, acc);
+        return acc;
+    }
+
+    private String generateAccountNumber() {
+        // Formato simples: "0001", "0002", ...
+        String num = String.format("%04d", nextAccountSequence++);
+        while (accounts.containsKey(num)) {
+            num = String.format("%04d", nextAccountSequence++);
+        }
+        return num;
+    }
+
+    public void listAccounts() {
+        if (accounts.isEmpty()) {
+            System.out.println("Nenhuma conta cadastrada.");
+            return;
+        }
+        System.out.printf("%-6s %-20s %-10s %-12s%n", "Nº", "Titular", "Tipo", "Saldo");
+        for (Account a : accounts.values()) {
+            System.out.printf("%-6s %-20s %-10s R$ %.2f%n", a.getAccountNumber(), a.getOwner(), a.getType(), a.getBalance());
+        }
+    }
+
+    public void deposit(String accNum, double amount) {
+        Account a = accounts.get(accNum);
+        if (a == null) {
+            System.out.println("Conta não encontrada.");
+            return;
+        }
+        if (amount <= 0) {
+            System.out.println("Valor deve ser positivo.");
+            return;
+        }
+        a.deposit(amount);
+        System.out.printf("Depositado R$ %.2f na conta %s. Saldo: R$ %.2f%n", amount, accNum, a.getBalance());
+    }
+
+    public void withdraw(String accNum, double amount) {
+        Account a = accounts.get(accNum);
+        if (a == null) {
+            System.out.println("Conta não encontrada.");
+            return;
+        }
+        if (amount <= 0) {
+            System.out.println("Valor deve ser positivo.");
+            return;
+        }
+        boolean ok = a.withdraw(amount);
+        if (ok) {
+            System.out.printf("Saque de R$ %.2f realizado. Saldo: R$ %.2f%n", amount, a.getBalance());
+        } else {
+            System.out.println("Saldo insuficiente.");
+        }
+    }
+
+    public void transfer(String fromAcc, String toAcc, double amount) {
+        Account aFrom = accounts.get(fromAcc);
+        Account aTo = accounts.get(toAcc);
+        if (aFrom == null || aTo == null) {
+            System.out.println("Conta origem ou destino não encontrada.");
+            return;
+        }
+        if (amount <= 0) {
+            System.out.println("Valor deve ser positivo.");
+            return;
+        }
+        boolean ok = aFrom.withdraw(amount);
+        if (!ok) {
+            System.out.println("Saldo insuficiente na conta origem.");
+            return;
+        }
+        aTo.deposit(amount);
+        String desc = String.format("Transferencia %s -> %s", fromAcc, toAcc);
+        aFrom.addTransaction(new Transaction(-amount, desc));
+        aTo.addTransaction(new Transaction(amount, desc));
+        System.out.printf("Transferido R$ %.2f de %s para %s.%n", amount, fromAcc, toAcc);
+    }
+
+    public void printStatement(String accNum) {
+        Account a = accounts.get(accNum);
+        if (a == null) {
+            System.out.println("Conta não encontrada.");
+            return;
+        }
+        System.out.println("\n--- EXTRATO: Conta " + accNum + " / Titular: " + a.getOwner() + " ---");
+        a.printTransactions();
+        System.out.printf("Saldo atual: R$ %.2f%n", a.getBalance());
+    }
+
+    /* Persistência simples em arquivo texto.
+       Formato improvisado:
+       NEXTSEQ=<n>
+       ACCOUNT|accNum|owner|type|balance
+       TX|accNum|timestamp|amount|description
+     */
+    public void saveToFile() {
+        try (PrintWriter pw = new PrintWriter(new FileWriter(storageFile))) {
+            pw.println("NEXTSEQ=" + nextAccountSequence);
+            for (Account a : accounts.values()) {
+                pw.printf("ACCOUNT|%s|%s|%s|%.2f%n", escape(a.getAccountNumber()), escape(a.getOwner()), escape(a.getType()), a.getBalance());
+                for (Transaction t : a.getTransactions()) {
+                    pw.printf("TX|%s|%s|%.2f|%s%n", escape(a.getAccountNumber()), t.getTimestamp().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME), t.getAmount(), escape(t.getDescription()));
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("Erro salvando dados: " + e.getMessage());
+        }
+    }
+
+    public void loadFromFile() {
+        File f = new File(storageFile);
+        if (!f.exists()) return;
+        try (BufferedReader br = new BufferedReader(new FileReader(f))) {
+            String line;
+            Map<String, List<Transaction>> txMap = new HashMap<>();
+            while ((line = br.readLine()) != null) {
+                if (line.startsWith("NEXTSEQ=")) {
+                    String v = line.substring("NEXTSEQ=".length()).trim();
+                    try {
+                        nextAccountSequence = Integer.parseInt(v);
+                    } catch (NumberFormatException ignored) {}
+                } else if (line.startsWith("ACCOUNT|")) {
+                    String[] p = line.split("\\|", 5);
+                    if (p.length >= 5) {
+                        String accNum = unescape(p[1]);
+                        String owner = unescape(p[2]);
+                        String type = unescape(p[3]);
+                        double bal = Double.parseDouble(p[4]);
+                        Account a = new Account(accNum, owner, type, bal);
+                        accounts.put(accNum, a);
+                    }
+                } else if (line.startsWith("TX|")) {
+                    String[] p = line.split("\\|", 5);
+                    if (p.length >= 5) {
+                        String accNum = unescape(p[1]);
+                        LocalDateTime ts = LocalDateTime.parse(p[2]);
+                        double amt = Double.parseDouble(p[3]);
+                        String desc = unescape(p[4]);
+                        Transaction t = new Transaction(ts, amt, desc);
+                        txMap.computeIfAbsent(accNum, k -> new ArrayList<>()).add(t);
+                    }
+                }
+            }
+            // Após leitura, atribui transações
+            for (Map.Entry<String, List<Transaction>> e : txMap.entrySet()) {
+                Account a = accounts.get(e.getKey());
+                if (a != null) {
+                    for (Transaction t : e.getValue()) a.addTransaction(t);
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("Erro carregando dados: " + e.getMessage());
+        }
+    }
+
+    private String escape(String s) {
+        return s.replace("|", "\\|");
+    }
+    private String unescape(String s) {
+        return s.replace("\\|", "|");
+    }
+}
+
+/* ---- Account class ---- */
+class Account {
+    private final String accountNumber;
+    private final String owner;
+    private final String type;
+    private double balance;
+    private final List<Transaction> transactions = new ArrayList<>();
+
+    public Account(String accountNumber, String owner, String type) {
+        this(accountNumber, owner, type, 0.0);
+    }
+
+    public Account(String accountNumber, String owner, String type, double balance) {
+        this.accountNumber = accountNumber;
+        this.owner = owner;
+        this.type = type;
+        this.balance = balance;
+    }
+
+    public String getAccountNumber() { return accountNumber; }
+    public String getOwner() { return owner; }
+    public String getType() { return type; }
+    public double getBalance() { return balance; }
+
+    public List<Transaction> getTransactions() { return Collections.unmodifiableList(transactions); }
+
+    public void deposit(double amount) {
+        balance += amount;
+        addTransaction(new Transaction(amount, "Depósito"));
+    }
+
+    public boolean withdraw(double amount) {
+        if (amount > balance) return false;
+        balance -= amount;
+        addTransaction(new Transaction(-amount, "Saque"));
+        return true;
+    }
+
+    public void addTransaction(Transaction t) {
+        transactions.add(t);
+    }
+
+    public void printTransactions() {
+        if (transactions.isEmpty()) {
+            System.out.println("Nenhuma transação.");
+            return;
+        }
+        System.out.printf("%-20s %-12s %-40s%n", "Data/Hora", "Valor", "Descrição");
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        for (Transaction t : transactions) {
+            System.out.printf("%-20s R$ %8.2f %-40s%n", t.getTimestamp().format(fmt), t.getAmount(), t.getDescription());
+        }
+    }
+}
+
+/* ---- Transaction class ---- */
+class Transaction {
+    private final LocalDateTime timestamp;
+    private final double amount;
+    private final String description;
+
+    public Transaction(double amount, String description) {
+        this(LocalDateTime.now(), amount, description);
+    }
+
+    public Transaction(LocalDateTime timestamp, double amount, String description) {
+        this.timestamp = timestamp;
+        this.amount = amount;
+        this.description = description;
+    }
+
+    public LocalDateTime getTimestamp() { return timestamp; }
+    public double getAmount() { return amount; }
+    public String getDescription() { return description; }
+}
